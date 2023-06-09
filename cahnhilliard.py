@@ -19,97 +19,99 @@ from scipy.fft import fft2, ifft2
  an implicit pseudospectral algorithm
 """
 
-Nsteps = 1000
-dt = 0.1
+def run(c, nsteps=1000, dt=0.1, dx=1.0, M=1.0, kappa=0.5, rho=2.0, alpha=0.0, beta=1.0):
 
-N = 256
-c_hat = np.empty((N,N), dtype=np.complex64)
-dfdc_hat = np.empty((N,N), dtype=np.complex64)
+    N = c.shape[0]
+    c_hat = np.empty((N,N), dtype=np.complex64)
+    dfdc_hat = np.empty((N,N), dtype=np.complex64)
 
-c = np.empty((Nsteps,N,N), dtype=np.float32)
+    L = N * dx
 
-dx = 1.0
-L = N*dx
+    print('c0 = ',c.sum()*dx**2/L**2)
 
-noise = 0.1
-c0 = 0.5
+    kx = ky = np.fft.fftfreq(N, d=dx)*2*np.pi
+    K = np.array(np.meshgrid(kx , ky ,indexing ='ij'), dtype=np.float32)
+    K2 = np.sum(K*K,axis=0, dtype=np.float32)
 
-rng = np.random.default_rng(12345) # the seed of random numbers generator
+    # The anti-aliasing factor
+    kmax_dealias = kx.max()*2.0/3.0 # The Nyquist mode
+    dealias = np.array((np.abs(K[0]) < kmax_dealias )*(np.abs(K[1]) < kmax_dealias ),dtype =bool)
 
-c[0] = c0 + noise*rng.standard_normal(c[0].shape)
+    """
+     The interfacial free energy density f(c) = Wc^2(1-c)^2
+    """
+    def finterf(c_hat):
+        return kappa*ifft2(K2*c_hat**2).real
 
-# plt.imshow(c)
-# plt.colorbar(cmap='RdBu_r')
-# # plt.title('$c_0=%.1f$'% c0)
-# plt.savefig('cahn-hilliard-input.png')
-# plt.show()
+    """
+     The bulk free energy density f(c) = W*c^2(1-c)^2
+    """
+    def fbulk(c):
+        return rho * (c - alpha) ** 2 * (c - beta) ** 2
 
-print('c0 = ',c[0].sum()*dx**2/L**2)
+    """
+     The derivative of bulk free energy density f(c) = Wc^2(1-c)^2
+    """
+    def dfdc(c):
+        return 2 * rho * (c - alpha) * (c - beta) * (2 * c - (alpha + beta))
 
-W = 2.0
-M = 1.0 # mobility
-kappa = 0.5 #gradient coeficient
+    def free_energy(c, c_hat):
+        c_x = ifft2(c_hat * 1j * K[0]).real
+        c_y = ifft2(c_hat * 1j * K[1]).real
+        return (kappa * (c_x**2 + c_y**2) / 2. + fbulk(c)).sum() * dx**2
 
-kx = ky = np.fft.fftfreq(N, d=dx)*2*np.pi
-K = np.array(np.meshgrid(kx , ky ,indexing ='ij'), dtype=np.float32)
-K2 = np.sum(K*K,axis=0, dtype=np.float32)
+    c_hat[:] = fft2(c)
 
-# The anti-aliasing factor  
-kmax_dealias = kx.max()*2.0/3.0 # The Nyquist mode
-dealias = np.array((np.abs(K[0]) < kmax_dealias )*(np.abs(K[1]) < kmax_dealias ),dtype =bool)
+    c_old = c.copy()
 
-"""
- The interfacial free energy density f(c) = Wc^2(1-c)^2
-"""
-def finterf(c_hat):
-    return kappa*ifft2(K2*c_hat**2).real 
+    free_energies = []
+    free_energies.append(free_energy(c, c_hat))
+    for i in range(nsteps):
+        dfdc_hat[:] = fft2(dfdc(c_old)) # the FT of the derivative
+        dfdc_hat *= dealias # dealising
+        c_hat[:] = (c_hat-dt*K2*M*dfdc_hat)/(1+dt*M*kappa*K2**2) # updating in time
+        c_old[:] = c
+        c = ifft2(c_hat).real # inverse fourier transform
+        free_energies.append(free_energy(c, c_hat))
 
-"""
- The bulk free energy density f(c) = Wc^2(1-c)^2
-"""
-def fbulk(c):
-    return W*c**2*(1-c)*c**2
+    print('relative_error = ',np.abs(c_old.sum()-c.sum())/c.sum())
 
-"""
- The derivative of bulk free energy density f(c) = Wc^2(1-c)^2
-"""
-def dfdc(c):
-    return 2*W*(c*(1-c)**2-(1-c)*c**2)
+    return c, free_energies
 
-c_hat[:] = fft2(c[0])
-for i in range(1,Nsteps):
-    dfdc_hat[:] = fft2(dfdc(c[i-1])) # the FT of the derivative
-    dfdc_hat *= dealias # dealising
-    c_hat[:] = (c_hat-dt*K2*M*dfdc_hat)/(1+dt*M*kappa*K2**2) # updating in time
-    c[i] = ifft2(c_hat).real # inverse fourier transform
-    
-print('c = ',c[-1].sum()*dx**2/L**2)
+def plot(c, alpha, beta):
+    plt.imshow(c,cmap='RdBu_r', vmin=alpha, vmax=beta)
+    plt.savefig('cahn-hilliard.1f.png')
+    plt.show()
 
-print('relative_error = ',np.abs(c[-1].sum()-c[0].sum())/c[0].sum())
+def plot_free_energy(fs, nsteps, dt):
+    import pandas
+    dd = pandas.read_csv('moose_psu_1a_IA.csv')
+    print(dd.columns)
+    plt.loglog(np.arange(nsteps + 1) * dt, fs)
+    plt.loglog(dd.time, dd.f_density)
+    plt.show()
 
-plt.imshow(c[-1],cmap='RdBu_r', vmin=0.0, vmax=1.0)
-plt.title('$c_0=%.1f$'% c0)
-plt.savefig('cahn-hilliard-c0-%.1f.png'% c0)
-plt.show()
+def initial_conc(x, y):
+    return 0.5 + 0.01 * (np.cos(0.105 * x) * np.cos(0.11 * y) + (np.cos(0.13 * x) * np.cos(0.087 * y))**2 \
+                         + np.cos(0.025 * x - 0.15 * y) * np.cos(0.07 * x - 0.02 * y))
 
-from matplotlib import animation
-from matplotlib.animation import PillowWriter
+if __name__ == '__main__':
+    dt = 0.01
+    N = 512
+    Lx = 200.0
+    dx  = Lx / N
+    # xx = np.linspace(dx / 2.0, Lx - dx / 2.0, N)
+    xx = np.linspace(0, Lx - dx, N)
+    x, y = np.meshgrid(xx, xx)
+    alpha = 0.3
+    beta = 0.7
+    c = initial_conc(x, y)
+    nsteps = 10000
+    # rng = np.random.default_rng(12345) # the seed of random numbers generator
+    # noise = 0.1
+    # c = c0 + noise * rng.standard_normal([256, 256])
 
-# generate the GIF animation
+    c, fs = run(c, nsteps=nsteps, dx=dx, dt=dt, alpha=0.3, beta=0.7, rho=5.0, kappa=2.0, M=5)
 
-fig, ax = plt.subplots(1,1,figsize=(4,4))
-im = ax.imshow(c[0],cmap='RdBu_r', vmin=0.0, vmax=1.0)
-cb = fig.colorbar(im,ax=ax, label=r'$c(x,y)$', shrink=0.8)
-tx = ax.text(190,20,'t={:.1f}'.format(0.0),
-         bbox=dict(boxstyle="round",ec='white',fc='white'))
-ax.set_title(r'$c_0=%.1f$'% c0)
-
-def animate(i):
-    im.set_data(c[5*i])
-    im.set_clim(0.0, 1.0)
-    tx.set_text('t={:.1f}'.format(5*i*dt))
-    return fig,
-
-ani = animation.FuncAnimation(fig, animate, frames= 199,
-                               interval = 50)
-ani.save('ch-c0='+str(c0)+'.gif',writer='pillow',fps=24,dpi=100)
+    # plot(c, alpha, beta)
+    plot_free_energy(fs, nsteps, dt)

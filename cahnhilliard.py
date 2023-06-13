@@ -57,6 +57,18 @@ def run(c, nsteps=1000, dt=0.1, dx=1.0, M=1.0, kappa=0.5, rho=2.0, alpha=0.0, be
 
     def free_energy(c, c_hat):
         c_x = ifft2(c_hat * 1j * K[0]).real
+        c_x_hat = fft2(c_x)
+        from scipy.signal import fftconvolve
+        conv = fftconvolve(c_x_hat, c_x_hat, mode='same')
+        conv_ = ifft2(conv).real * dx
+        other = dx * c_x**2
+        print(c_x.shape)
+        print(c_x_hat.shape)
+        print(conv.shape)
+        print(conv_.shape)
+        print(conv_[:5, :5])
+        print(other[:5, :5])
+        raw_input('stopped')
         c_y = ifft2(c_hat * 1j * K[1]).real
         return (kappa * (c_x**2 + c_y**2) / 2. + fbulk(c)).sum() * dx**2
 

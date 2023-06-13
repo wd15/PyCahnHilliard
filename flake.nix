@@ -18,6 +18,8 @@
           matplotlib
           tkinter
           pandas
+          jupyterlab
+          notebook
         ];
         shellHook = ''
           # export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt

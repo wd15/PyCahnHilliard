@@ -20,6 +20,8 @@
           pandas
           jupyterlab
           notebook
+          numba
+          joblib
         ];
         shellHook = ''
           # export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
